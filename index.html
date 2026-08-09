@@ -1048,8 +1048,8 @@ function renderProductDetail(){
 
 
     <div class="quick-nums">
-      <div class="qn"><div class="l">Best-Case Net Landing / ${p.unit}</div><div class="v">${money(bestNetPerUnit)}</div></div>
-      <div class="qn"><div class="l">Best-Case Net Landing / ${pq}${p.unit}</div><div class="v">${money(bestNetPack)}</div></div>
+      <div class="qn"><div class="l">Loading / ${p.unit} (best case)</div><div class="v" style="color:var(--teal-dark);">−${money(maxb.totalPerUnit)}</div></div>
+      <div class="qn"><div class="l">Best-Case Net Landing / ${refQty}${p.unit}</div><div class="v">${money(bestNetPerUnit*refQty)}</div></div>
     </div>
   `;
   document.getElementById('qSkuSize').onchange = (e)=>{ selectedQty = parseFloat(e.target.value); render(); };
