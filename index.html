@@ -89,10 +89,10 @@
     border-radius:13px;padding:3px;
   }
   .tab{
-    flex:1;background:none;border:none;padding:9px 4px;
-    font-size:12.5px;font-weight:700;color:var(--ink-soft);
+    flex:1;background:none;border:none;padding:9px 3px;
+    font-size:11.5px;font-weight:700;color:var(--ink-soft);
     cursor:pointer;font-family:'Inter';border-radius:10px;
-    transition:all .18s ease;
+    transition:all .18s ease;white-space:nowrap;
   }
   .tab.active{color:#fff;background:var(--grad-ink);box-shadow:var(--shadow-md);}
 
@@ -340,6 +340,7 @@
     <div class="tabs">
       <button class="tab active" id="tabProducts">Products</button>
       <button class="tab" id="tabSummary">Order Summary</button>
+      <button class="tab" id="tabManual">Manual Calc</button>
     </div>
   </div>
 </header>
@@ -594,12 +595,15 @@ function basketArray(){
 function render(){
   document.getElementById('tabProducts').classList.toggle('active', activeTab==='products');
   document.getElementById('tabSummary').classList.toggle('active', activeTab==='summary');
+  document.getElementById('tabManual').classList.toggle('active', activeTab==='manual');
   if(activeTab==='products') renderProducts();
+  else if(activeTab==='manual') renderManualCalc();
   else renderSummary();
   renderStickyBar();
 }
 document.getElementById('tabProducts').onclick=()=>{activeTab='products';selectedProductId=null;render();};
 document.getElementById('tabSummary').onclick=()=>{activeTab='summary';render();};
+document.getElementById('tabManual').onclick=()=>{activeTab='manual';render();};
 document.getElementById('sbOpen').onclick=()=>{activeTab='summary';render();};
 document.getElementById('fabSearch').onclick=()=>{
   activeTab='products'; selectedProductId=null; render();
@@ -610,6 +614,173 @@ document.getElementById('fabSearch').onclick=()=>{
 // ---------- 20L Quick Lookup tab ----------
 let selectedProductId = null;
 let selectedQty = null;
+
+// ---------- Manual Calc tab ----------
+let manualProductId = null;
+let manualQty = 20;
+let manualCdPercent = 5;
+let manualEbPercent = 0;
+let manualProductSearch = '';
+let manualPickerOpen = false;
+const MANUAL_EB_OPTIONS = [0, 0.40, 0.60, 0.75, 1.00, 1.15, 1.35, 1.50, 1.75, 1.90, 2.10, 2.25];
+
+// Mirrors computeProduct() but takes an explicit CD% instead of reading DATA.cdPercent, so the
+// Manual Calc tab can test a different cash-discount tier without touching the global header setting.
+function computeProductManual(p, qty, cdPercent){
+  const q = qty||0;
+  const unitRate = effectiveRatePerUnit(p, q);
+  const dplValue = unitRate*q;
+  const inbill = p.inbillFixed!=null ? p.inbillFixed*q : dplValue*(p.inbillPercent||0)/100;
+  const gsrValue = dplValue - inbill;
+  const cd = gsrValue*(cdPercent/100);
+  const netAfterTaxValue = (gsrValue - cd) * (1+DATA.gstPercent/100);
+  const inbillRateForUnit = p.inbillFixed!=null ? p.inbillFixed : unitRate*(p.inbillPercent||0)/100;
+  const netRatePerUnit = q>0 ? netAfterTaxValue/q : (unitRate-inbillRateForUnit)*(1-cdPercent/100)*(1+DATA.gstPercent/100);
+
+  let percentSlabCN = 0, additionalOfferCN = 0;
+  (p.volumeRules||[]).forEach(rule=>{
+    if(rule.type==='percent_slab'){
+      const s = findSlab(rule.slabs,q);
+      if(s) percentSlabCN += gsrValue*s.percent/100;
+    }else if(rule.type==='gsr_percent_slab'){
+      const s = findSlab(rule.slabs,gsrValue);
+      if(s) percentSlabCN += gsrValue*s.percent/100;
+    }else if(rule.type==='flat_slab'){
+      const s = findSlab(rule.slabs,q);
+      if(s) additionalOfferCN += s.amount;
+    }else if(rule.type==='flat_rate_slab'){
+      const s = findSlab(rule.slabs,q);
+      if(s) additionalOfferCN += s.rate*q;
+    }else if(rule.type==='per_increment'){
+      const from = rule.from||0;
+      const extra = Math.max(0,q-from);
+      const count = Math.floor(extra/rule.every);
+      additionalOfferCN += count*rule.amount;
+    }
+  });
+  const volumeBenefit = percentSlabCN + additionalOfferCN;
+  return {dplValue, inbill, gsrValue, cd, netAfterTaxValue, netRatePerUnit, percentSlabCN, additionalOfferCN, volumeBenefit};
+}
+
+function renderManualCalc(){
+  if(!manualProductId) manualProductId = DATA.products[0].id;
+  const p = DATA.products.find(x=>x.id===manualProductId);
+  const cats={};
+  DATA.products.forEach(pr=>{(cats[pr.category]=cats[pr.category]||[]).push(pr);});
+
+  const q = manualQty||0;
+  const calc = computeProductManual(p, q, manualCdPercent);
+  const ebAmount = calc.gsrValue*(manualEbPercent/100);
+  const totalLoading = calc.volumeBenefit + ebAmount;
+  const loadingPerUnit = q>0 ? totalLoading/q : 0;
+  const percentBenefit = calc.dplValue>0 ? ((calc.inbill+totalLoading)/calc.dplValue)*100 : 0;
+  const schemeLandingPerUnit = calc.netRatePerUnit - loadingPerUnit;
+  const landing20 = schemeLandingPerUnit*20;
+  const landing1 = schemeLandingPerUnit*1;
+  const normal20 = calc.netRatePerUnit*20;
+  const normal1 = calc.netRatePerUnit*1;
+
+  let html = `<div class="note-box">Standalone what-if tool — pick any product, quantity, CD tier and Early Bird % independently of your basket, and see the resulting Scheme Landing per 20L and per 1L. Product/Volume CN and Additional Offer are still auto-calculated from the quantity you enter; only CD and Early Bird are manual here.</div>`;
+
+  html += `<div class="admin-block" style="margin-top:14px;">
+    <div class="stitle" style="margin-top:0;">Product</div>
+    ${manualPickerOpen ? `
+      <input class="search" id="mcProductSearch" placeholder="Search product…" value="${manualProductSearch.replace(/"/g,'&quot;')}" style="margin-bottom:8px;" />
+      <div id="mcProductList" style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;background:var(--paper);">
+        ${(()=>{
+          const f = manualProductSearch.trim().toLowerCase();
+          let listHtml = '';
+          Object.keys(cats).forEach(cat=>{
+            const matches = cats[cat].filter(pr=>!f||pr.name.toLowerCase().includes(f));
+            if(!matches.length) return;
+            listHtml += `<div style="padding:8px 12px 4px;font-size:10px;font-weight:800;color:var(--purple);text-transform:uppercase;letter-spacing:.08em;">${cat}</div>`;
+            matches.forEach(pr=>{
+              const sel = pr.id===manualProductId;
+              listHtml += `<div data-mcpick="${pr.id}" style="padding:10px 12px;cursor:pointer;font-size:13px;font-weight:${sel?'700':'500'};color:${sel?'var(--teal-dark)':'var(--ink)'};background:${sel?'var(--teal-soft)':'transparent'};border-bottom:1px solid var(--line-soft);">${pr.name}</div>`;
+            });
+          });
+          if(!listHtml) listHtml = `<div style="padding:14px;font-size:12.5px;color:var(--ink-soft);">No products match.</div>`;
+          return listHtml;
+        })()}
+      </div>
+    ` : `
+      <div id="mcProductChip" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card);cursor:pointer;">
+        <span style="font-size:13.5px;font-weight:600;color:var(--ink);">${p.name}</span>
+        <span style="font-size:11px;color:var(--teal-dark);font-weight:700;">Change ›</span>
+      </div>
+    `}
+
+    <div class="stitle">Quantity (${p.unit})</div>
+    <input type="number" inputmode="numeric" id="mcQty" value="${manualQty||''}" placeholder="0" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;font-size:13.5px;font-family:'IBM Plex Mono',monospace;background:var(--paper);color:var(--ink);" />
+
+    <div style="display:flex;gap:10px;margin-top:12px;">
+      <div style="flex:1;">
+        <div class="stitle" style="margin-top:0;">CD Type</div>
+        <select id="mcCd" style="width:100%;padding:10px 8px;border:1px solid var(--line);border-radius:12px;font-size:13px;font-family:'Inter';background:var(--card);color:var(--ink);">
+          <option value="5" ${manualCdPercent==5?'selected':''}>CD1 · 5%</option>
+          <option value="4.25" ${manualCdPercent==4.25?'selected':''}>CD2 · 4.25%</option>
+          <option value="3.5" ${manualCdPercent==3.5?'selected':''}>CD3 · 3.5%</option>
+        </select>
+      </div>
+      <div style="flex:1;">
+        <div class="stitle" style="margin-top:0;">Early Bird %</div>
+        <select id="mcEb" style="width:100%;padding:10px 8px;border:1px solid var(--line);border-radius:12px;font-size:13px;font-family:'IBM Plex Mono',monospace;background:var(--card);color:var(--ink);">
+          ${MANUAL_EB_OPTIONS.map(v=>`<option value="${v}" ${v===manualEbPercent?'selected':''}>${v.toFixed(2)}%</option>`).join('')}
+        </select>
+      </div>
+    </div>
+  </div>`;
+
+  html += `<div class="breakdown-row"><div class="l"><b>DPL rate</b>for ${q}${p.unit}</div><div class="r">${money(calc.dplValue)}</div></div>`;
+  html += `<div class="breakdown-row"><div class="l"><b>In-Bill</b>${inbillLabel(p)}</div><div class="r">−${money(calc.inbill)}</div></div>`;
+  html += `<div class="breakdown-row"><div class="l"><b>GSR</b>DPL − Inbill</div><div class="r">${money(calc.gsrValue)}</div></div>`;
+  html += `<div class="breakdown-row"><div class="l"><b>CD (${manualCdPercent}%)</b>on GSR</div><div class="r">−${money(calc.cd)}</div></div>`;
+  html += `<div class="breakdown-row"><div class="l"><b>Net Landing after Tax</b>+GST ${DATA.gstPercent}%</div><div class="r">${money(calc.netAfterTaxValue)}</div></div>`;
+  html += `<div class="breakdown-row"><div class="l"><b>Product/Volume CN</b>auto, at ${q} ${p.unit}</div><div class="r">−${money(calc.percentSlabCN)}</div></div>`;
+  html += `<div class="breakdown-row"><div class="l"><b>Additional Offer</b>auto, at ${q} ${p.unit}</div><div class="r">−${money(calc.additionalOfferCN)}</div></div>`;
+  html += `<div class="breakdown-row"><div class="l"><b>Early Bird (manual)</b>${manualEbPercent.toFixed(2)}% of GSR</div><div class="r">−${money(ebAmount)}</div></div>`;
+
+  html += `<div class="grand" style="margin-top:16px;">
+    <div class="row"><span>Per Litre Loading</span><b>${money(loadingPerUnit)}/${p.unit}</b></div>
+    <div class="final">
+      <div class="l">Percentage Benefit<br><span style="font-size:10px;color:#767c8c;">(In-Bill + Product CN + Early Bird + other schemes, on DPL — excl. CD)</span></div>
+      <div class="v">${percentBenefit.toFixed(2)}%</div>
+    </div>
+  </div>`;
+
+  html += `<div class="quick-nums" style="margin-top:14px;">
+    <div class="qn"><div class="l">Normal Landing / 20${p.unit}</div><div class="v" style="color:#C9C2B8;">${money(normal20)}</div></div>
+    <div class="qn"><div class="l">Net Landing / 20${p.unit} after Scheme</div><div class="v">${money(landing20)}</div></div>
+    <div class="qn"><div class="l">Normal Landing / 1${p.unit}</div><div class="v" style="color:#C9C2B8;">${money(normal1)}</div></div>
+    <div class="qn"><div class="l">Net Landing / 1${p.unit} after Scheme</div><div class="v">${money(landing1)}</div></div>
+  </div>`;
+
+  mainArea.innerHTML = html;
+
+  if(manualPickerOpen){
+    const sb = document.getElementById('mcProductSearch');
+    if(sb){
+      sb.addEventListener('input', e=>{ manualProductSearch = e.target.value; render(); });
+      // Keep focus + caret when re-rendering as the user types
+      sb.focus();
+      try{ const v=sb.value; sb.setSelectionRange(v.length,v.length); }catch(err){}
+    }
+    document.querySelectorAll('[data-mcpick]').forEach(row=>{
+      row.addEventListener('click', ()=>{
+        manualProductId = row.dataset.mcpick;
+        manualPickerOpen = false;
+        manualProductSearch = '';
+        render();
+      });
+    });
+  }else{
+    const chip = document.getElementById('mcProductChip');
+    if(chip) chip.addEventListener('click', ()=>{ manualPickerOpen = true; render(); });
+  }
+  document.getElementById('mcQty').oninput = e=>{ manualQty = parseFloat(e.target.value)||0; render(); const el=document.getElementById('mcQty'); if(el){el.focus(); try{const v=el.value; el.setSelectionRange(v.length,v.length);}catch(err){}} };
+  document.getElementById('mcCd').onchange = e=>{ manualCdPercent = parseFloat(e.target.value); render(); };
+  document.getElementById('mcEb').onchange = e=>{ manualEbPercent = parseFloat(e.target.value); render(); };
+}
 
 function skuOptions(p){
   if(p.unit==='Kg') return [1,5,10,20];
