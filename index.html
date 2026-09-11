@@ -844,11 +844,8 @@ function skuOptions(p){
 // Per the Q2 FY27 Golden Start Family Edition circular (1 Jul'26–30 Sep'26), only products in the
 // scheme's 5 categories (Luxury/Premium/Economy/Enamels/Others product lists, incl. Alpha variants)
 // earn points toward this — everything else in the catalog is excluded from this specific benefit.
-const TRIP_SCHEME_NAME = 'Trip options (Sept 2026)';
-// Sept'26 trips (Enamel Thailand Dhamaka, Style Getaway) are opt-in ALTERNATIVES to the CN slabs
-// for two specific product families only (see gift schemes), not a blanket extra % on top of
-// every product's best case — so this is intentionally 0 this month, unlike the old Aug scheme.
-const TRIP_SCHEME_PCT = 0;
+const TRIP_SCHEME_NAME = 'Golden Start / Opus Start';
+const TRIP_SCHEME_PCT = 3; // average loading on GSR, opted-for-CN case, eligible products only — standing quarterly scheme, independent of the monthly trade letters
 
 // ---- Category-combined Product CN groups (Aug 2026 letter, section 4) ----
 // Unlike the per-product volumeRules above, these two slab tables are keyed on COMBINED volume
@@ -1161,6 +1158,14 @@ function renderProductDetail(){
   }
   const pq = selectedQty;
   const calc = computeProduct(p, pq);
+  {
+    const grp = CATEGORY_CN_GROUPS.find(g=>g.productIds.includes(p.id));
+    if(grp){
+      const s = findSlab(grp.slabs, pq);
+      calc.percentSlabCN = s ? calc.gsrValue*s.percent/100 : 0;
+      calc.volumeBenefit = calc.percentSlabCN + calc.additionalOfferCN;
+    }
+  }
   const effRate = effectiveRatePerUnit(p, pq); // real per-pack rate if verified, else linear from basePrice
   const loadingPerUnit = pq>0 ? calc.volumeBenefit/pq : 0;
   const schemeLandingPerUnit = calc.netRatePerUnit - loadingPerUnit;
@@ -1172,6 +1177,14 @@ function renderProductDetail(){
   // scheme letter is always visible even when checking a bulk custom quantity like 200L.
   const refQty = baseQtyForProduct(p);
   const refCalc = refQty!==pq ? computeProduct(p, refQty) : calc;
+  if(refQty!==pq){
+    const grp = CATEGORY_CN_GROUPS.find(g=>g.productIds.includes(p.id));
+    if(grp){
+      const s = findSlab(grp.slabs, refQty);
+      refCalc.percentSlabCN = s ? refCalc.gsrValue*s.percent/100 : 0;
+      refCalc.volumeBenefit = refCalc.percentSlabCN + refCalc.additionalOfferCN;
+    }
+  }
   const refLoadingPerUnit = refQty>0 ? refCalc.volumeBenefit/refQty : 0;
   const refSchemeLandingPerUnit = refCalc.netRatePerUnit - refLoadingPerUnit;
   const refSchemeLandingPack = refSchemeLandingPerUnit*refQty;
