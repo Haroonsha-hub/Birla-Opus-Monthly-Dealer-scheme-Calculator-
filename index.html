@@ -1176,26 +1176,15 @@ function renderProductDetail(){
   // alongside whatever qty the dealer is actually exploring, so the figure they'd expect from the
   // scheme letter is always visible even when checking a bulk custom quantity like 200L.
   const refQty = baseQtyForProduct(p);
-  const refCalc = refQty!==pq ? computeProduct(p, refQty) : calc;
-  if(refQty!==pq){
-    const grp = CATEGORY_CN_GROUPS.find(g=>g.productIds.includes(p.id));
-    if(grp){
-      const s = findSlab(grp.slabs, refQty);
-      refCalc.percentSlabCN = s ? refCalc.gsrValue*s.percent/100 : 0;
-      refCalc.volumeBenefit = refCalc.percentSlabCN + refCalc.additionalOfferCN;
-    }
-  }
-  const refLoadingPerUnit = refQty>0 ? refCalc.volumeBenefit/refQty : 0;
-  const refSchemeLandingPerUnit = refCalc.netRatePerUnit - refLoadingPerUnit;
-  const refSchemeLandingPack = refSchemeLandingPerUnit*refQty;
-  const refNormalLandingPack = refCalc.netRatePerUnit*refQty;
+  // Per-refQty figures at the rate THIS order actually earns — not a fresh calc at refQty (which
+  // would re-earn whatever CN slab applies at that smaller size, and could show ₹0 if refQty falls
+  // below this month's minimum qty for a scheme). Normal Landing is the plain DPL → Inbill → CD →
+  // GST chain (no scheme at all, so it's a stable baseline); Net Landing after Scheme takes the
+  // per-unit rate earned at the qty entered above and scales it to refQty for easy comparison.
+  const perRefNormalAtOrderRate = calc.netRatePerUnit*refQty;
+  const perRefSchemeAtOrderRate = schemeLandingPerUnit*refQty;
 
-  // "If billed at this qty" per-20L figure — NOT a fresh calc at 20L (which would re-earn a lower
-  // CN slab). This keeps the per-unit rate actually EARNED by ordering pq litres, and just expresses
-  // it per 20L for easy side-by-side comparison against other 20L-reference products, e.g. "if a
-  // dealer billed 200L, what does that 200L-earned rate work out to per 20L?"
-  const per20AtOrderRate = schemeLandingPerUnit*20;
-  const per20NormalAtOrderRate = calc.netRatePerUnit*20;
+  // (Earned-rate-at-refQty figures now computed above as perRefNormalAtOrderRate / perRefSchemeAtOrderRate)
 
   // Early Bird estimate for THIS product in isolation — treats this product's own GSR (at the
   // qty being explored) as if it were the entire basket's GSR. Early Bird is a basket-level scheme
@@ -1268,19 +1257,11 @@ function renderProductDetail(){
       <div class="qn"><div class="l">Net Landing / ${pq}${p.unit} after Scheme</div><div class="v">${money(schemeLandingPack)}</div></div>
       <div class="qn"><div class="l">Net Landing / ${pq}${p.unit} after Scheme + EB (est.)</div><div class="v" style="color:#3DE0A8;">${money(schemeLandingPackWithEB)}</div></div>
       ${refQty!==pq?`
-      <div class="qn"><div class="l">Normal Landing / ${refQty}${p.unit} (ref. pack)</div><div class="v" style="color:#C9C2B8;">${money(refNormalLandingPack)}</div></div>
-      <div class="qn"><div class="l">Net Landing / ${refQty}${p.unit} after Scheme (ref. pack)</div><div class="v">${money(refSchemeLandingPack)}</div></div>
+      <div class="qn"><div class="l">Normal Landing / ${refQty}${p.unit}</div><div class="v" style="color:#C9C2B8;">${money(perRefNormalAtOrderRate)}</div></div>
+      <div class="qn"><div class="l">Net Landing / ${refQty}${p.unit} after Scheme</div><div class="v">${money(perRefSchemeAtOrderRate)}</div></div>
       `:''}
     </div>
-
-    ${pq!==20?`
-    <h3 style="margin:18px 0 4px;font-size:15px;">Per 20L — at your ${pq}${p.unit} order's earned rate</h3>
-    <div class="note-box" style="margin:8px 0;">Not a fresh 20L calculation (that would re-earn a lower CN slab) — this takes the per-${p.unit} rate your ${pq}${p.unit} order actually earns and simply scales it to 20${p.unit}, so you can compare against other 20L-reference products.</div>
-    <div class="quick-nums">
-      <div class="qn"><div class="l">Normal Landing / 20${p.unit}</div><div class="v" style="color:#C9C2B8;">${money(per20NormalAtOrderRate)}</div></div>
-      <div class="qn"><div class="l">Net Landing / 20${p.unit} after Scheme</div><div class="v">${money(per20AtOrderRate)}</div></div>
-    </div>
-    `:''}
+    ${refQty!==pq?`<div class="note-box" style="margin-top:8px;">The ${refQty}${p.unit} figures above scale the rate your ${pq}${p.unit} order actually earns down to a ${refQty}${p.unit} reference (not a fresh calculation at ${refQty}${p.unit}), so they move with the quantity you enter and stay comparable across products.</div>`:''}
 
     <h3 style="margin:22px 0 4px;font-size:15px;">Maximum scheme (best case)</h3>
     <div class="note-box">Assumes the order is large enough to hit the top slab of every scheme at once — In-Bill, this product's own Product/Volume CN + Additional Offer, plus the best Early Bird slab available across the month${maxb.tripEligible ? `, plus the ${TRIP_SCHEME_NAME} quarterly trip scheme (this product is in the Q2 FY27 Golden Start product list)` : ''}. No GSR-Value CN scheme this month. Early Bird eligibility really depends on your <i>total</i> GSR across the whole order — see Order Summary for an actual basket.${maxb.tripEligible ? ` The ${TRIP_SCHEME_NAME} line only applies if the dealer has qualified for the quarterly trip and opts for CN instead of travel — it's not a guaranteed benefit, so treat it as a ceiling, not a promise.` : ''}</div>
